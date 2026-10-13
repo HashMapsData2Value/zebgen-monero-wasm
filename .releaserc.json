@@ -1,0 +1,33 @@
+{
+  "branches": ["main"],
+  "tagFormat": "v${version}",
+  "plugins": [
+    "@semantic-release/commit-analyzer",
+    "@semantic-release/release-notes-generator",
+    "@semantic-release/changelog",
+    [
+      "@semantic-release/exec",
+      {
+        "prepareCmd": "./scripts/set-version.sh ${nextRelease.version} && ./scripts/build.sh",
+        "publishCmd": "cd dist && sha256sum *.tgz > zebgen-monero-wasm-${nextRelease.version}.tgz.sha256"
+      }
+    ],
+    ["@semantic-release/npm", { "pkgRoot": "pkg", "tarballDir": "dist" }],
+    [
+      "@semantic-release/github",
+      {
+        "assets": [
+          { "path": "dist/*.tgz", "label": "npm package tarball" },
+          { "path": "dist/*.sha256", "label": "SHA-256 of the tarball" }
+        ]
+      }
+    ],
+    [
+      "@semantic-release/git",
+      {
+        "assets": ["Cargo.toml", "Cargo.lock", "CHANGELOG.md"],
+        "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
+      }
+    ]
+  ]
+}

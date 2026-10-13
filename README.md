@@ -53,16 +53,16 @@ repository.
 
 ## Install
 
-Releases are built from the tagged source by GitHub Actions and attached to
-[GitHub Releases](https://github.com/HashMapsData2Value/zebgen-monero-wasm/releases) as an npm
-tarball, with a `.sha256` file alongside.
-
 ```sh
-npm install --save-exact https://github.com/HashMapsData2Value/zebgen-monero-wasm/releases/download/v0.1.0/zebgen-monero-wasm-0.1.0.tgz
+npm install --save-exact zebgen-monero-wasm
 ```
 
-`package-lock.json` records the tarball's integrity hash, so later installs fail if the file
-changes.
+Releases from v0.1.1 onward are built from source and published to
+[npm](https://www.npmjs.com/package/zebgen-monero-wasm) by GitHub Actions using npm trusted
+publishing, so each version on npm carries a provenance statement linking it to the exact
+commit and workflow run that built it. (v0.1.0 was published by hand from the CI-built
+tarball, so it has no provenance statement.) The same tarball, with a `.sha256` file, is
+attached to each [GitHub Release](https://github.com/HashMapsData2Value/zebgen-monero-wasm/releases).
 
 ## Usage
 
@@ -191,12 +191,24 @@ The tests in `tests/` run against a real Monero regtest network and need extra s
 
 ## Releasing
 
-1. Bump `version` in `Cargo.toml` and commit.
-2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
+Releases are automatic. Every push to `main` runs the
+[release workflow](.github/workflows/release.yml), which uses
+[semantic-release](https://semantic-release.gitbook.io/) to pick the next version from
+[Conventional Commits](https://www.conventionalcommits.org/):
 
-The [release workflow](.github/workflows/release.yml) checks that the tag matches `Cargo.toml`,
-runs `cargo test`, builds `pkg/`, and publishes `zebgen-monero-wasm-<version>.tgz` and its
-`.sha256` to a GitHub Release.
+| Commit | Release |
+|---|---|
+| `fix: ...` | patch (0.1.0 → 0.1.1) |
+| `feat: ...` | minor (0.1.0 → 0.2.0) |
+| `feat!: ...` or a `BREAKING CHANGE:` footer | major (0.x → 1.0.0) |
+| `docs:`, `ci:`, `chore:`, `test:`, ... | no release |
+
+When a release is due, the workflow runs `cargo test`, writes the new version into
+`Cargo.toml`, rebuilds `pkg/` from source, publishes it to npm (trusted publishing, no stored
+token), creates the GitHub Release with the tarball and its SHA-256, and commits the version
+bump and `CHANGELOG.md` back to `main`.
+
+The npm trusted publisher is tied to the workflow filename, so keep it named `release.yml`.
 
 ## License
 

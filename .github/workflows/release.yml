@@ -1,24 +1,34 @@
 name: Release
 
-# Push a tag matching Cargo.toml's version (e.g. v0.1.0) to build pkg/ from source
-# and attach it to a GitHub Release as an npm tarball.
+# semantic-release picks the next version from Conventional Commits on main, writes it into
+# Cargo.toml, rebuilds pkg/ from source, publishes to npm via trusted publishing (OIDC, with
+# provenance) and attaches the tarball to a GitHub Release. npm's trusted publisher is bound
+# to this workflow's filename: keep it named release.yml.
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
 
-      - name: Check tag matches Cargo.toml version
-        run: |
-          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
-          test "v$VERSION" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != v$VERSION"; exit 1; }
+      # Trusted publishing needs npm >= 11.5.1.
+      - uses: actions/setup-node@v4
+        with: { node-version: '24' }
+      - run: npm --version
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -35,17 +45,10 @@ jobs:
           tool: wasm-bindgen@${{ steps.bindgen.outputs.version }}
 
       - run: cargo test --locked
+      # Builds pkg/ so semantic-release's npm plugin can verify it; rebuilt with the new version on release.
       - run: ./scripts/build.sh
 
-      - name: Pack
-        id: pack
-        working-directory: pkg
-        run: |
-          TARBALL=$(npm pack --silent)
-          sha256sum "$TARBALL" | tee "$TARBALL.sha256"
-          echo "tarball=pkg/$TARBALL" >> "$GITHUB_OUTPUT"
-
-      - name: Publish GitHub Release
+      - run: npm ci
+      - run: npx semantic-release
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" "${{ steps.pack.outputs.tarball }}" "${{ steps.pack.outputs.tarball }}.sha256" --generate-notes
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
