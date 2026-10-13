@@ -14,7 +14,14 @@ cat > pkg/package.json <<EOF
 {
   "name": "zebgen-monero-wasm",
   "version": "$VERSION",
+  "description": "Monero wallet scanning and signing in WebAssembly, built on monero-oxide",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HashMapsData2Value/zebgen-monero-wasm.git"
+  },
+  "homepage": "https://github.com/HashMapsData2Value/zebgen-monero-wasm#readme",
+  "keywords": ["monero", "wasm", "wallet", "monero-oxide"],
   "type": "module",
   "main": "zebgen_monero_wasm.js",
   "types": "zebgen_monero_wasm.d.ts",
@@ -22,7 +29,7 @@ cat > pkg/package.json <<EOF
   "sideEffects": false
 }
 EOF
-cp LICENSE pkg/LICENSE
+cp LICENSE README.md pkg/
 
 # zebgen's MV3 CSP forbids eval; fail the build if the generated glue ever uses it.
 if grep -nE 'new Function|[^.a-zA-Z_]eval\(' pkg/*.js pkg-node/*.js; then
