@@ -118,14 +118,74 @@ pub async fn create_transaction(
   amount_atomic: String,
   relay: bool,
 ) -> Result<JsValue, JsError> {
-  let network = network_from_u8(network).map_err(js_err)?;
-  let spend = scalar_from_hex("private spend key", &private_spend_key_hex).map_err(js_err)?;
-  let view = scalar_from_hex("private view key", &private_view_key_hex).map_err(js_err)?;
   let amount: u64 =
     amount_atomic.parse().map_err(|_| js_err("amount must be a whole number of atomic units"))?;
   if amount == 0 {
     return Err(js_err("amount must be greater than zero"));
   }
+  send(
+    daemon_url,
+    username,
+    password,
+    network,
+    private_spend_key_hex,
+    private_view_key_hex,
+    restore_height,
+    recipient,
+    Some(amount),
+    relay,
+  )
+  .await
+}
+
+/// Like `createTransaction`, but sends the whole unlocked balance minus the fee.
+///
+/// All unlocked outputs are spent in a single transaction, which fails with
+/// "too large of a transaction" if the wallet holds very many outputs.
+#[wasm_bindgen(js_name = sweepTransaction)]
+#[allow(clippy::too_many_arguments)]
+pub async fn sweep_transaction(
+  daemon_url: String,
+  username: Option<String>,
+  password: Option<String>,
+  network: u8,
+  private_spend_key_hex: String,
+  private_view_key_hex: String,
+  restore_height: u32,
+  recipient: String,
+  relay: bool,
+) -> Result<JsValue, JsError> {
+  send(
+    daemon_url,
+    username,
+    password,
+    network,
+    private_spend_key_hex,
+    private_view_key_hex,
+    restore_height,
+    recipient,
+    None,
+    relay,
+  )
+  .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn send(
+  daemon_url: String,
+  username: Option<String>,
+  password: Option<String>,
+  network: u8,
+  private_spend_key_hex: String,
+  private_view_key_hex: String,
+  restore_height: u32,
+  recipient: String,
+  amount: Option<u64>,
+  relay: bool,
+) -> Result<JsValue, JsError> {
+  let network = network_from_u8(network).map_err(js_err)?;
+  let spend = scalar_from_hex("private spend key", &private_spend_key_hex).map_err(js_err)?;
+  let view = scalar_from_hex("private view key", &private_view_key_hex).map_err(js_err)?;
 
   let daemon = connect(&daemon_url, username, password).await?;
   let built = wallet::build_transaction(
@@ -147,7 +207,7 @@ pub async fn create_transaction(
   let set = |key: &str, value: JsValue| Reflect::set(&result, &key.into(), &value).map(|_| ());
   set("hash", hex::encode(built.transaction.hash()).into())
     .and_then(|()| set("feeAtomic", built.fee.to_string().into()))
-    .and_then(|()| set("amountAtomic", amount.to_string().into()))
+    .and_then(|()| set("amountAtomic", built.amount.to_string().into()))
     .and_then(|()| set("balanceAtomic", built.unlocked_balance.to_string().into()))
     .and_then(|()| set("relayed", relay.into()))
     .and_then(|()| set("txHex", hex::encode(built.transaction.serialize()).into()))

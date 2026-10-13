@@ -111,6 +111,7 @@ units).
 | `daemonHeight(url, username?, password?)` | chain height (number of blocks) | yes |
 | `unlockedBalance(url, username?, password?, privateSpendKeyHex, privateViewKeyHex, restoreHeight)` | spendable balance (string) | yes |
 | `createTransaction(url, username?, password?, network, privateSpendKeyHex, privateViewKeyHex, restoreHeight, recipient, amountAtomic, relay)` | `{ hash, feeAtomic, amountAtomic, balanceAtomic, relayed, txHex }` | yes |
+| `sweepTransaction(url, username?, password?, network, privateSpendKeyHex, privateViewKeyHex, restoreHeight, recipient, relay)` | same as `createTransaction`; `amountAtomic` is the balance minus the fee | yes |
 
 `unlockedBalance` needs the private spend key because spent outputs are detected by computing
 their key images.
@@ -127,6 +128,11 @@ their key images.
    each (ring size 16).
 5. Build a CLSAG + Bulletproofs+ transaction at the node's "normal" fee priority, with change
    going back to the primary address, sign it, and broadcast it if `relay` is true.
+
+`sweepTransaction` instead spends **every** unlocked output in one transaction and sends the
+whole balance minus the fee. Like Monero's own wallet, it still adds a zero-amount change output,
+since Monero transactions need at least two outputs. A wallet holding very many outputs can
+exceed the maximum transaction size; the call then fails with "too large of a transaction".
 
 ### Nodes
 

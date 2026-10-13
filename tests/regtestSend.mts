@@ -103,4 +103,43 @@ expect(
   `Monero's own wallet2 (monero-wallet-rpc) independently sees 1 XMR at the recipient`
 );
 
+const final = newKeys();
+const sweep = await wasm.sweepTransaction(
+  DAEMON,
+  undefined,
+  undefined,
+  MoneroNetworkType.MAINNET,
+  recipient.privateSpendKey,
+  recipient.privateViewKey,
+  restoreHeight,
+  final.address,
+  true
+);
+console.log('sweepTransaction', { ...sweep, txHex: `${sweep.txHex.length / 2} bytes` });
+expect(
+  BigInt(sweep.amountAtomic) + BigInt(sweep.feeAtomic) === ONE_XMR,
+  `sweep sends the whole balance minus the fee (${sweep.amountAtomic} + ${sweep.feeAtomic})`
+);
+
+await mine(miner.address, 11);
+const sweptBalance = BigInt(
+  await wasm.unlockedBalance(DAEMON, undefined, undefined, recipient.privateSpendKey, recipient.privateViewKey, restoreHeight)
+);
+expect(sweptBalance === 0n, `swept wallet is empty afterwards (${sweptBalance})`);
+
+await jsonRpc(WALLET_RPC, 'generate_from_keys', {
+  filename: `wasm-sweep-check-${Date.now()}`,
+  password: '',
+  address: final.address,
+  viewkey: final.privateViewKey,
+  restore_height: restoreHeight,
+});
+await jsonRpc(WALLET_RPC, 'refresh', { start_height: restoreHeight });
+const finalBalance = await jsonRpc<{ unlocked_balance: number }>(WALLET_RPC, 'get_balance', {});
+await jsonRpc(WALLET_RPC, 'close_wallet', {});
+expect(
+  BigInt(finalBalance.unlocked_balance) === BigInt(sweep.amountAtomic),
+  `Monero's own wallet2 sees the swept amount at the final address (view-only)`
+);
+
 console.log('PASS');

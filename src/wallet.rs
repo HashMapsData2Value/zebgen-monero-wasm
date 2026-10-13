@@ -23,6 +23,7 @@ const MAX_FEE_PER_WEIGHT: u64 = 10_000_000;
 
 pub struct BuiltTransaction {
   pub transaction: Transaction,
+  pub amount: u64,
   pub fee: u64,
   pub unlocked_balance: u64,
 }
@@ -110,6 +111,8 @@ pub async fn unlocked_balance<T: HttpTransport>(
   Ok(unspent.iter().map(|o| o.commitment().amount).sum())
 }
 
+/// Builds and signs a payment of `amount`, or of the whole unlocked balance minus the fee when
+/// `amount` is `None` (a sweep).
 #[allow(clippy::too_many_arguments)]
 pub async fn build_transaction<T: HttpTransport>(
   daemon: &MoneroDaemon<T>,
@@ -118,7 +121,7 @@ pub async fn build_transaction<T: HttpTransport>(
   view_key: Zeroizing<Scalar>,
   restore_height: usize,
   recipient: &str,
-  amount: u64,
+  amount: Option<u64>,
 ) -> Result<BuiltTransaction, String> {
   let recipient = MoneroAddress::from_str(network, recipient)
     .map_err(|e| format!("invalid recipient address: {e}"))?;
@@ -136,6 +139,43 @@ pub async fn build_transaction<T: HttpTransport>(
     .map_err(|e| format!("fee rate: {e}"))?;
   let mut outgoing_view_key = Zeroizing::new([0u8; 32]);
   OsRng.fill_bytes(outgoing_view_key.as_mut());
+  let signable_for = |inputs: &[OutputWithDecoys], amount: u64| {
+    SignableTransaction::new(
+      RctType::ClsagBulletproofPlus,
+      outgoing_view_key.clone(),
+      inputs.to_vec(),
+      vec![(recipient, amount)],
+      // A sweep still gets a (zero-amount) change output: Monero needs two outputs, as wallet2 does.
+      Change::new(pair.clone(), None),
+      vec![],
+      fee_rate,
+    )
+  };
+
+  let Some(amount) = amount else {
+    if outputs.is_empty() {
+      return Err("no unlocked funds to send".to_owned());
+    }
+    let mut inputs = Vec::with_capacity(outputs.len());
+    for output in outputs {
+      inputs.push(
+        OutputWithDecoys::new(&mut OsRng, daemon, RING_LEN, tip, output)
+          .await
+          .map_err(|e| format!("decoy selection: {e}"))?,
+      );
+    }
+    // The fee depends only on the transaction's shape (inputs, outputs), not on the amounts.
+    let fee = signable_for(&inputs, 1).map_err(|e| e.to_string())?.necessary_fee();
+    let amount = unlocked_balance.checked_sub(fee).filter(|a| *a > 0).ok_or_else(|| {
+      format!("unlocked balance {unlocked_balance} does not cover the fee {fee}")
+    })?;
+    let signable = signable_for(&inputs, amount).map_err(|e| e.to_string())?;
+    if signable.necessary_fee() != fee {
+      return Err("fee changed between estimate and build".to_owned());
+    }
+    let transaction = signable.sign(&mut OsRng, spend_key).map_err(|e| e.to_string())?;
+    return Ok(BuiltTransaction { transaction, amount, fee, unlocked_balance });
+  };
 
   let insufficient =
     || format!("insufficient unlocked funds: have {unlocked_balance}, need {amount} plus fee");
@@ -155,15 +195,7 @@ pub async fn build_transaction<T: HttpTransport>(
       );
       need_more = false;
     }
-    match SignableTransaction::new(
-      RctType::ClsagBulletproofPlus,
-      outgoing_view_key.clone(),
-      inputs.clone(),
-      vec![(recipient, amount)],
-      Change::new(pair.clone(), None),
-      vec![],
-      fee_rate,
-    ) {
+    match signable_for(&inputs, amount) {
       Ok(signable) => break signable,
       Err(SendError::NotEnoughFunds { .. }) => need_more = true,
       Err(e) => return Err(e.to_string()),
@@ -172,7 +204,7 @@ pub async fn build_transaction<T: HttpTransport>(
 
   let fee = signable.necessary_fee();
   let transaction = signable.sign(&mut OsRng, spend_key).map_err(|e| e.to_string())?;
-  Ok(BuiltTransaction { transaction, fee, unlocked_balance })
+  Ok(BuiltTransaction { transaction, amount, fee, unlocked_balance })
 }
 
 pub async fn publish<T: HttpTransport>(
