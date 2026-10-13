@@ -807,7 +807,7 @@ dependencies = [
 
 [[package]]
 name = "zebgen-monero-wasm"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64",
  "curve25519-dalek",
