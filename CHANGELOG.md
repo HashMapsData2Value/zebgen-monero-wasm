@@ -1,3 +1,10 @@
+# [0.3.0](https://github.com/HashMapsData2Value/zebgen-monero-wasm/compare/v0.2.0...v0.3.0) (2026-10-15)
+
+
+### Features
+
+* add view-only funding scans and bounded cancellable RPC ([194f6f3](https://github.com/HashMapsData2Value/zebgen-monero-wasm/commit/194f6f3c6f4f14a48dd706c0923bbc1d62d1797d))
+
 # [0.2.0](https://github.com/HashMapsData2Value/zebgen-monero-wasm/compare/v0.1.1...v0.2.0) (2026-10-13)
 
 
