@@ -71,7 +71,7 @@ once to load the WebAssembly before using any other function.
 
 ```ts
 import init, { daemonHeight, createTransaction } from 'zebgen-monero-wasm';
-import wasmUrl from 'zebgen-monero-wasm/zebgen_monero_wasm_bg.wasm?url'; // Vite
+import wasmUrl from 'zebgen-monero-wasm/zebgen_monero_wasm_bg.wasm?url&no-inline'; // Vite
 
 // Pass the URL explicitly: bundled service workers have no usable import.meta.url.
 await init({ module_or_path: wasmUrl });
@@ -109,12 +109,37 @@ units).
 | `primaryAddress(network, publicSpendKeyHex, privateViewKeyHex)` | primary address | no |
 | `isValidAddress(network, address)` | `boolean` | no |
 | `daemonHeight(url, username?, password?)` | chain height (number of blocks) | yes |
+| `daemonNetwork(url, username?, password?)` | `mainnet`, `testnet`, `stagenet`, or `regtest` (daemon `fakechain`) | yes |
+| `relayTransaction(url, username?, password?, txHex)` | hash of the exact signed transaction broadcast | yes |
+| `setDiagnosticsEnabled(enabled)` | enables opt-in scan-stage and panic-source-location console logs | no |
+| `scanFunding(url, username, password, publicSpendKeyHex, privateViewKeyHex, restoreHeight, options?)` | `{ receivedAtomic, matureAtomic, lockedAtomic, scannedHeight, spentStatusKnown: false }` | yes |
 | `unlockedBalance(url, username?, password?, privateSpendKeyHex, privateViewKeyHex, restoreHeight)` | spendable balance (string) | yes |
 | `createTransaction(url, username?, password?, network, privateSpendKeyHex, privateViewKeyHex, restoreHeight, recipient, amountAtomic, relay)` | `{ hash, feeAtomic, amountAtomic, balanceAtomic, relayed, txHex }` | yes |
 | `sweepTransaction(url, username?, password?, network, privateSpendKeyHex, privateViewKeyHex, restoreHeight, recipient, relay)` | same as `createTransaction`; `amountAtomic` is the balance minus the fee | yes |
 
 `unlockedBalance` needs the private spend key because spent outputs are detected by computing
 their key images.
+
+`scanFunding` needs only the public spend key and private view key. It reports
+historical received RingCT outputs on the node's reported chain, including outputs
+that may already have been spent. `matureAtomic` describes timelock maturity, not
+unspent or spendable balance; mempool funding is not included. Optional controls
+are `{ signal: AbortSignal, onProgress: ({ scannedHeight, targetHeight }) => void }`.
+Cancellation aborts active RPC requests and stops between batches, but cannot
+interrupt synchronous processing mid-batch. Callback exceptions reject the scan.
+
+RPC requests have a 60-second deadline covering headers, streamed bodies, and
+authentication retries. Response limits supplied by the daemon client are enforced
+while reading, before copying an oversized chunk into WASM memory. This is not a
+global browser-memory limit. Use the packaged WASM asset rather than an inline
+data URL: inline loading reproduced a Chromium renderer crash under debugging.
+
+Address encoding does not identify the connected chain: regtest uses mainnet
+addresses but is a separate simulated network. Call `daemonNetwork` to verify
+the daemon's reported chain. For separate review and confirmation, prepare with
+`relay=false`, retain the signed `txHex`, and broadcast it with `relayTransaction`.
+Diagnostics are disabled by default; when enabled they report scan ranges/output
+counts and panic locations, not keys, credentials, or transaction contents.
 
 ### How a send works
 

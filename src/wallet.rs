@@ -8,7 +8,7 @@ use monero_wallet::{
   interface::prelude::*,
   ringct::RctType,
   send::{Change, SendError, SignableTransaction},
-  transaction::Transaction,
+  transaction::{Transaction, Timelock},
 };
 use rand_core::{OsRng, RngCore as _};
 use zeroize::Zeroizing;
@@ -28,6 +28,53 @@ pub struct BuiltTransaction {
   pub unlocked_balance: u64,
 }
 
+pub struct Funding {
+  pub received: u64,
+  pub mature: u64,
+  pub scanned_height: usize,
+}
+
+pub async fn scan_funding<T: HttpTransport>(
+  daemon: &MoneroDaemon<T>,
+  pair: &ViewPair,
+  restore_height: usize,
+  check_cancelled: impl Fn() -> Result<(), String>,
+  on_progress: impl Fn(usize, usize) -> Result<(), String>,
+) -> Result<Funding, String> {
+  check_cancelled()?;
+  let tip = daemon.latest_block_number().await.map_err(|error| error.to_string())?;
+  check_cancelled()?;
+  if restore_height > tip + 1 {
+    return Err("restore height is beyond the daemon height".into());
+  }
+  let mut scanner = Scanner::new(pair.clone());
+  let mut funding = Funding { received: 0, mature: 0, scanned_height: tip + 1 };
+  let mut start = restore_height;
+  while start <= tip {
+    check_cancelled()?;
+    let end = (start + SCAN_BATCH - 1).min(tip);
+    let blocks = daemon.contiguous_scannable_blocks(start ..= end).await
+      .map_err(|error| error.to_string())?;
+    check_cancelled()?;
+    for block in blocks {
+      let number = block.block.number();
+      let outputs = scanner.scan(block).map_err(|error| error.to_string())?;
+      for output in outputs.ignore_additional_timelock() {
+        let amount = output.commitment().amount;
+        funding.received = funding.received.checked_add(amount).ok_or("received amount overflow")?;
+        if number + DEFAULT_LOCK_WINDOW <= tip + 1 &&
+          output.additional_timelock() <= Timelock::Block(tip) {
+          funding.mature = funding.mature.checked_add(amount).ok_or("mature amount overflow")?;
+        }
+      }
+    }
+    start = end + 1;
+    on_progress(start, tip + 1)?;
+    check_cancelled()?;
+  }
+  Ok(funding)
+}
+
 fn key_image(spend_key: &Scalar, output: &WalletOutput) -> [u8; 32] {
   let input_key = Zeroizing::new(spend_key.clone().into() + output.key_offset().into());
   let hashed = Point::biased_hash(output.key().compress().to_bytes()).into();
@@ -45,6 +92,7 @@ async fn scan_unlocked<T: HttpTransport>(
   let mut start = restore_height;
   while start <= tip {
     let end = (start + SCAN_BATCH - 1).min(tip);
+    crate::diagnostics::event(&format!("scan: requesting blocks {start}..={end}"));
     let blocks =
       daemon.contiguous_scannable_blocks(start ..= end).await.map_err(|e| e.to_string())?;
     for block in blocks {
@@ -58,6 +106,7 @@ async fn scan_unlocked<T: HttpTransport>(
     }
     start = end + 1;
   }
+  crate::diagnostics::event(&format!("scan: {} unlocked outputs", found.len()));
   Ok(found)
 }
 
@@ -69,19 +118,23 @@ async fn filter_unspent<T: HttpTransport>(
   if outputs.is_empty() {
     return Ok(outputs);
   }
+  crate::diagnostics::event(&format!("spent check: {} outputs", outputs.len()));
   let key_images: Vec<String> =
     outputs.iter().map(|o| hex::encode(key_image(spend_key, o))).collect();
+  crate::diagnostics::event("spent check: key images computed");
   let params = serde_json::json!({ "key_images": key_images }).to_string();
   // `rpc_call` is outside monero-daemon-rpc's SemVer guarantees; safe because the crate is pinned exactly.
   let response = daemon
     .rpc_call("is_key_image_spent", Some(params), 1024 + 16 * outputs.len())
     .await
     .map_err(|e| e.to_string())?;
+  crate::diagnostics::event("spent check: RPC response received");
   let parsed: serde_json::Value = serde_json::from_str(&response).map_err(|e| e.to_string())?;
   let statuses = parsed["spent_status"]
     .as_array()
     .filter(|s| s.len() == outputs.len())
     .ok_or("daemon returned a malformed is_key_image_spent response")?;
+  crate::diagnostics::event("spent check: response validated");
   // 0 = unspent; 1 = spent on chain; 2 = spent in the mempool.
   Ok(
     outputs

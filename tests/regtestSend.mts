@@ -37,6 +37,10 @@ function expect(condition: boolean, message: string): void {
   console.log(`ok - ${message}`);
 }
 
+const networkInfo = await jsonRpc<{ nettype: string }>(DAEMON, 'get_info');
+expect(networkInfo.nettype === 'fakechain', 'daemon is the isolated local regtest chain, not public mainnet');
+console.log(`LOCAL REGTEST ONLY at ${DAEMON}: locally mined test coins; mainnet address encoding does not mean public mainnet.`);
+
 const sender = newKeys();
 const recipient = newKeys();
 const miner = newKeys();
@@ -63,20 +67,35 @@ const tx = await wasm.createTransaction(
   restoreHeight,
   recipient.address,
   ONE_XMR.toString(),
-  true
+  false
 );
 console.log(`createTransaction took ${Date.now() - t0}ms`, { ...tx, txHex: `${tx.txHex.length / 2} bytes` });
 expect(BigInt(tx.balanceAtomic) === startBalance, 'reported balance matches unlockedBalance');
 
+const beforeRelay = await fetch(`${DAEMON}/get_transaction_pool_hashes`, { method: 'POST' }).then((response) => response.json());
+expect(!tx.relayed && !beforeRelay.tx_hashes?.includes(tx.hash), 'prepared payment is not broadcast');
+const relayedHash = await wasm.relayTransaction(DAEMON, undefined, undefined, tx.txHex);
+expect(relayedHash === tx.hash, 'relay publishes the exact prepared payment hash');
+
 const pool = await fetch(`${DAEMON}/get_transaction_pool_hashes`, { method: 'POST' }).then((r) => r.json());
 expect(pool.tx_hashes?.includes(tx.hash), 'daemon accepted the transaction into its mempool');
 
-await mine(miner.address, 11);
+await mine(miner.address, 1);
+const lockedFunding = await wasm.scanFunding(DAEMON, undefined, undefined,
+  recipient.publicSpendKey, recipient.privateViewKey, restoreHeight);
+expect(lockedFunding.receivedAtomic === ONE_XMR.toString() && lockedFunding.matureAtomic === '0' &&
+  lockedFunding.lockedAtomic === ONE_XMR.toString() && lockedFunding.spentStatusKnown === false,
+  'view-only scan detects locked funding without claiming spent knowledge');
+await mine(miner.address, 10);
 
 const recipientBalance = BigInt(
   await wasm.unlockedBalance(DAEMON, undefined, undefined, recipient.privateSpendKey, recipient.privateViewKey, restoreHeight)
 );
 expect(recipientBalance === ONE_XMR, `wasm sees exactly 1 XMR at the recipient (${recipientBalance})`);
+const matureFunding = await wasm.scanFunding(DAEMON, undefined, undefined,
+  recipient.publicSpendKey, recipient.privateViewKey, restoreHeight);
+expect(matureFunding.receivedAtomic === ONE_XMR.toString() && matureFunding.matureAtomic === ONE_XMR.toString() &&
+  matureFunding.lockedAtomic === '0', 'view-only scan detects maturity without a private spend key');
 
 const senderBalance = BigInt(
   await wasm.unlockedBalance(DAEMON, undefined, undefined, sender.privateSpendKey, sender.privateViewKey, restoreHeight)
@@ -113,9 +132,12 @@ const sweep = await wasm.sweepTransaction(
   recipient.privateViewKey,
   restoreHeight,
   final.address,
-  true
+  false
 );
 console.log('sweepTransaction', { ...sweep, txHex: `${sweep.txHex.length / 2} bytes` });
+const beforeSweepRelay = await fetch(`${DAEMON}/get_transaction_pool_hashes`, { method: 'POST' }).then((response) => response.json());
+expect(!sweep.relayed && !beforeSweepRelay.tx_hashes?.includes(sweep.hash), 'prepared sweep is not broadcast');
+expect(await wasm.relayTransaction(DAEMON, undefined, undefined, sweep.txHex) === sweep.hash, 'relay publishes the exact prepared sweep hash');
 expect(
   BigInt(sweep.amountAtomic) + BigInt(sweep.feeAtomic) === ONE_XMR,
   `sweep sends the whole balance minus the fee (${sweep.amountAtomic} + ${sweep.feeAtomic})`
@@ -126,6 +148,10 @@ const sweptBalance = BigInt(
   await wasm.unlockedBalance(DAEMON, undefined, undefined, recipient.privateSpendKey, recipient.privateViewKey, restoreHeight)
 );
 expect(sweptBalance === 0n, `swept wallet is empty afterwards (${sweptBalance})`);
+const spentFunding = await wasm.scanFunding(DAEMON, undefined, undefined,
+  recipient.publicSpendKey, recipient.privateViewKey, restoreHeight);
+expect(spentFunding.receivedAtomic === ONE_XMR.toString() && spentFunding.matureAtomic === ONE_XMR.toString() &&
+  spentFunding.spentStatusKnown === false, 'historical funding remains visible after spending; it is not an unspent balance');
 
 await jsonRpc(WALLET_RPC, 'generate_from_keys', {
   filename: `wasm-sweep-check-${Date.now()}`,
