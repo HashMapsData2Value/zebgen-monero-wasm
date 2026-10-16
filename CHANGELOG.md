@@ -1,3 +1,10 @@
+# [0.4.0](https://github.com/HashMapsData2Value/zebgen-monero-wasm/compare/v0.3.0...v0.4.0) (2026-10-16)
+
+
+### Features
+
+* **scan:** support cancellable balance scans with batch progress ([63cdbea](https://github.com/HashMapsData2Value/zebgen-monero-wasm/commit/63cdbeaa077f0f8eb88faf3fb5a8767c7e21def3))
+
 # [0.3.0](https://github.com/HashMapsData2Value/zebgen-monero-wasm/compare/v0.2.0...v0.3.0) (2026-10-15)
 
 
