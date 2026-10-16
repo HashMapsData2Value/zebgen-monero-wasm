@@ -237,6 +237,7 @@ pub async fn scan_funding(
 
 /// Unlocked, unspent balance in atomic units (decimal string), scanning from `restore_height`.
 #[wasm_bindgen(js_name = unlockedBalance)]
+#[allow(clippy::too_many_arguments)]
 pub async fn unlocked_balance(
   daemon_url: String,
   username: Option<String>,
@@ -244,14 +245,18 @@ pub async fn unlocked_balance(
   private_spend_key_hex: String,
   private_view_key_hex: String,
   restore_height: u32,
+  options: Option<JsValue>,
 ) -> Result<String, JsError> {
+  let control = FundingControl::parse(options.unwrap_or(JsValue::UNDEFINED))?;
+  control.check_cancelled().map_err(js_err)?;
   diagnostics::event("balance: parsing wallet keys");
   let spend = scalar_from_hex("private spend key", &private_spend_key_hex).map_err(js_err)?;
   let view = scalar_from_hex("private view key", &private_view_key_hex).map_err(js_err)?;
   diagnostics::event("balance: connecting");
-  let daemon = connect(&daemon_url, username, password).await?;
+  let daemon = connect_with_signal(&daemon_url, username, password, control.signal.clone()).await?;
   diagnostics::event("balance: scanning");
-  let balance = wallet::unlocked_balance(&daemon, &spend, view, restore_height as usize)
+  let balance = wallet::unlocked_balance(&daemon, &spend, view, restore_height as usize,
+    || control.check_cancelled(), |scanned, target| control.progress(scanned, target))
     .await
     .map_err(js_err)?;
   diagnostics::event("balance: completed");

@@ -86,15 +86,19 @@ async fn scan_unlocked<T: HttpTransport>(
   pair: &ViewPair,
   restore_height: usize,
   tip: usize,
+  check_cancelled: impl Fn() -> Result<(), String>,
+  on_progress: impl Fn(usize, usize) -> Result<(), String>,
 ) -> Result<Vec<WalletOutput>, String> {
   let mut scanner = Scanner::new(pair.clone());
   let mut found = vec![];
   let mut start = restore_height;
   while start <= tip {
+    check_cancelled()?;
     let end = (start + SCAN_BATCH - 1).min(tip);
     crate::diagnostics::event(&format!("scan: requesting blocks {start}..={end}"));
     let blocks =
       daemon.contiguous_scannable_blocks(start ..= end).await.map_err(|e| e.to_string())?;
+    check_cancelled()?;
     for block in blocks {
       let number = block.block.number();
       let outputs = scanner.scan(block).map_err(|e| e.to_string())?;
@@ -105,6 +109,8 @@ async fn scan_unlocked<T: HttpTransport>(
       found.extend(outputs.additional_timelock_satisfied_by(tip, 0));
     }
     start = end + 1;
+    on_progress(start, tip + 1)?;
+    check_cancelled()?;
   }
   crate::diagnostics::event(&format!("scan: {} unlocked outputs", found.len()));
   Ok(found)
@@ -156,11 +162,20 @@ pub async fn unlocked_balance<T: HttpTransport>(
   spend_key: &Zeroizing<Scalar>,
   view_key: Zeroizing<Scalar>,
   restore_height: usize,
+  check_cancelled: impl Fn() -> Result<(), String>,
+  on_progress: impl Fn(usize, usize) -> Result<(), String>,
 ) -> Result<u64, String> {
+  check_cancelled()?;
   let pair = ViewPair::new(public_key(spend_key), view_key).map_err(|e| e.to_string())?;
   let tip = daemon.latest_block_number().await.map_err(|e| e.to_string())?;
-  let outputs = scan_unlocked(daemon, &pair, restore_height, tip).await?;
+  check_cancelled()?;
+  if restore_height > tip + 1 {
+    return Err("restore height is beyond the daemon height".into());
+  }
+  let outputs = scan_unlocked(daemon, &pair, restore_height, tip, &check_cancelled, on_progress).await?;
+  check_cancelled()?;
   let unspent = filter_unspent(daemon, spend_key, outputs).await?;
+  check_cancelled()?;
   Ok(unspent.iter().map(|o| o.commitment().amount).sum())
 }
 
@@ -181,7 +196,7 @@ pub async fn build_transaction<T: HttpTransport>(
   let pair = ViewPair::new(public_key(spend_key), view_key).map_err(|e| e.to_string())?;
   let tip = daemon.latest_block_number().await.map_err(|e| e.to_string())?;
 
-  let outputs = scan_unlocked(daemon, &pair, restore_height, tip).await?;
+  let outputs = scan_unlocked(daemon, &pair, restore_height, tip, || Ok(()), |_, _| Ok(())).await?;
   let mut outputs = filter_unspent(daemon, spend_key, outputs).await?;
   let unlocked_balance: u64 = outputs.iter().map(|o| o.commitment().amount).sum();
   outputs.sort_by_key(|o| Reverse(o.commitment().amount));

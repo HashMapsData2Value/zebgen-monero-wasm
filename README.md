@@ -113,12 +113,19 @@ units).
 | `relayTransaction(url, username?, password?, txHex)` | hash of the exact signed transaction broadcast | yes |
 | `setDiagnosticsEnabled(enabled)` | enables opt-in scan-stage and panic-source-location console logs | no |
 | `scanFunding(url, username, password, publicSpendKeyHex, privateViewKeyHex, restoreHeight, options?)` | `{ receivedAtomic, matureAtomic, lockedAtomic, scannedHeight, spentStatusKnown: false }` | yes |
-| `unlockedBalance(url, username?, password?, privateSpendKeyHex, privateViewKeyHex, restoreHeight)` | spendable balance (string) | yes |
+| `unlockedBalance(url, username?, password?, privateSpendKeyHex, privateViewKeyHex, restoreHeight, options?)` | spendable balance (string) | yes |
 | `createTransaction(url, username?, password?, network, privateSpendKeyHex, privateViewKeyHex, restoreHeight, recipient, amountAtomic, relay)` | `{ hash, feeAtomic, amountAtomic, balanceAtomic, relayed, txHex }` | yes |
 | `sweepTransaction(url, username?, password?, network, privateSpendKeyHex, privateViewKeyHex, restoreHeight, recipient, relay)` | same as `createTransaction`; `amountAtomic` is the balance minus the fee | yes |
 
 `unlockedBalance` needs the private spend key because spent outputs are detected by computing
 their key images.
+
+Its optional trailing controls are `{ signal?: AbortSignal, onProgress?: callback }`.
+Progress reports `{ scannedHeight, targetHeight }` as block counts after each batch.
+Abort cancels active HTTP requests and rejects the operation without a partial
+balance. Completed block scanning is followed by spent-output verification; a
+progress report at the target height is not a final balance result. These controls
+do not apply to transaction preparation.
 
 `scanFunding` needs only the public spend key and private view key. It reports
 historical received RingCT outputs on the node's reported chain, including outputs
