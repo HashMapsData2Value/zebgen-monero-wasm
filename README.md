@@ -1,5 +1,30 @@
 # zebgen-monero-wasm
 
+## Incremental Balance Scanning (Unreleased)
+
+`scanBalanceBatch(url, username, password, privateSpendKey, privateViewKey,
+restoreHeight, checkpoint?, options?)` scans at most 100 new blocks and returns a
+JSON string with `checkpoint`, `scannedHeight`, `targetHeight`, `done`, and
+`balanceAtomic`. The balance is meaningful only when `done` is true. Options may
+contain an `AbortSignal` in `signal`.
+
+Pass `JSON.stringify(result.checkpoint)` to the next call. Persist the checkpoint
+only in encrypted storage, bound to the wallet, network, daemon and restore height.
+It contains serialized wallet outputs, including key offsets, and is sensitive.
+The API validates wallet public keys, restore height, chain anchor and batch
+linkage. A changed saved anchor starts over from the restore height; a reorg during
+the current operation rejects it. Locked outputs remain in the ledger, while
+maturity and spent key images are rechecked before returning a completed balance.
+This is daemon-trusting scanning, not independent consensus validation.
+
+Output serialization is library-specific and versioned here as checkpoint format
+1. Do not reuse these checkpoints with another output format. Transaction creation
+still uses its existing independent scan; this API does not change signing.
+
+Read-only local regression: build with `scripts/build.sh`, then run
+`node --test tests/balanceBatch.cjs` against an existing local daemon. It does not
+mine or send transactions.
+
 Monero wallet functions for browsers and browser extensions, compiled to
 WebAssembly from Rust. It wraps the [monero-oxide](https://github.com/monero-oxide/monero-oxide)
 crates [`monero-wallet`](https://crates.io/crates/monero-wallet) and
