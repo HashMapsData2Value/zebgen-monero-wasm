@@ -1,3 +1,10 @@
+# [0.5.0](https://github.com/HashMapsData2Value/zebgen-monero-wasm/compare/v0.4.0...v0.5.0) (2026-10-19)
+
+
+### Features
+
+* **scan:** persist incremental balance output checkpoints ([6b58a99](https://github.com/HashMapsData2Value/zebgen-monero-wasm/commit/6b58a9958e57dd424cde8de40b31ec3fb92e22a7))
+
 # [0.4.0](https://github.com/HashMapsData2Value/zebgen-monero-wasm/compare/v0.3.0...v0.4.0) (2026-10-16)
 
 
