@@ -1,0 +1,12 @@
+{
+  "editor.formatOnSave": true,
+  "files.eol": "\n",
+  "prettier.endOfLine": "lf",
+  "prettier.requireConfig": true,
+  "[javascript][javascriptreact][typescript][typescriptreact][json][jsonc][html][css][scss][markdown][yaml]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer"
+  }
+}

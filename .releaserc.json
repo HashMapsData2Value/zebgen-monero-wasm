@@ -12,13 +12,25 @@
         "publishCmd": "cd dist && sha256sum *.tgz > zebgen-monero-wasm-${nextRelease.version}.tgz.sha256"
       }
     ],
-    ["@semantic-release/npm", { "pkgRoot": "pkg", "tarballDir": "dist" }],
+    [
+      "@semantic-release/npm",
+      {
+        "pkgRoot": "pkg",
+        "tarballDir": "dist"
+      }
+    ],
     [
       "@semantic-release/github",
       {
         "assets": [
-          { "path": "dist/*.tgz", "label": "npm package tarball" },
-          { "path": "dist/*.sha256", "label": "SHA-256 of the tarball" }
+          {
+            "path": "dist/*.tgz",
+            "label": "npm package tarball"
+          },
+          {
+            "path": "dist/*.sha256",
+            "label": "SHA-256 of the tarball"
+          }
         ]
       }
     ],

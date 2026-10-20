@@ -1,6 +1,12 @@
 {
   "name": "zebgen-monero-wasm-release",
   "private": true,
+  "scripts": {
+    "format": "prettier --write . && cargo fmt",
+    "format:check": "prettier --check . && cargo fmt --check",
+    "format:staged": "node scripts/check-staged-format.mjs",
+    "hooks:install": "git config --local core.hooksPath .githooks"
+  },
   "description": "Release tooling only. The published package is generated into pkg/ by scripts/build.sh.",
   "devDependencies": {
     "@semantic-release/changelog": "7.0.0",
@@ -8,6 +14,7 @@
     "@semantic-release/git": "11.0.1",
     "@semantic-release/github": "12.0.10",
     "@semantic-release/npm": "13.2.0",
+    "prettier": "3.6.2",
     "semantic-release": "25.0.9"
   }
 }
