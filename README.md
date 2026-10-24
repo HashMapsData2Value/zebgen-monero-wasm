@@ -5,24 +5,33 @@
 `scanBalanceBatch(url, username, password, privateSpendKey, privateViewKey,
 restoreHeight, checkpoint?, options?)` scans at most 100 new blocks and returns a
 JSON string with `checkpoint`, `scannedHeight`, `targetHeight`, `done`, and
-`balanceAtomic`. The balance is meaningful only when `done` is true. Options may
+`balanceAtomic` (spendable) and `lockedAtomic` (mined but locked). Totals are
+meaningful only when `done` is true, and both exclude spent outputs. Options may
 contain an `AbortSignal` in `signal`.
 
 Pass `JSON.stringify(result.checkpoint)` to the next call. Persist the checkpoint
-only in encrypted storage, bound to the wallet, network, daemon and restore height.
+only in encrypted storage, bound to the wallet, network and daemon.
 It contains serialized wallet outputs, including key offsets, and is sensitive.
-The API validates wallet public keys, restore height, chain anchor and batch
-linkage. A changed saved anchor starts over from the restore height; a reorg during
+The API validates wallet public keys, coverage spans, chain anchors and batch
+linkage. A changed saved anchor starts over from the requested height; a reorg during
 the current operation rejects it. Locked outputs remain in the ledger, while
 maturity and spent key images are rechecked before returning a completed balance.
 This is daemon-trusting scanning, not independent consensus validation.
 
-Output serialization is library-specific and versioned here as checkpoint format
-1. Do not reuse these checkpoints with another output format. Transaction creation
+Checkpoint format 2 stores sorted, merged `spans` with inclusive `start`, exclusive
+`end`, and the end block's `anchorHash`. Requests can change restore height without
+losing prior outputs or coverage. Only gaps between that height and the current
+tip are downloaded. Totals include all known outputs, including earlier spans;
+unscanned gaps may contain missing payments. Format 1 cursors are adopted as a
+single span. Incoming mempool payments are not scanned. A covered refresh still
+checks anchors, maturity and spent status without downloading blocks again.
+
+Output serialization is library-specific. Do not reuse checkpoints with another
+output format. Transaction creation
 still uses its existing independent scan; this API does not change signing.
 
 Read-only local regression: build with `scripts/build.sh`, then run
-`node --test tests/balanceBatch.cjs` against an existing local daemon. It does not
+`node --test tests/balanceBatch.cjs tests/scanCoverage.cjs` against an existing local daemon. It does not
 mine or send transactions.
 
 Monero wallet functions for browsers and browser extensions, compiled to
@@ -105,15 +114,15 @@ const height = await daemonHeight('http://127.0.0.1:18081');
 
 const tx = await createTransaction(
   'http://127.0.0.1:18081',
-  undefined,                  // daemon username (optional)
-  undefined,                  // daemon password (optional)
-  0,                          // network: 0 mainnet, 1 testnet, 2 stagenet
+  undefined, // daemon username (optional)
+  undefined, // daemon password (optional)
+  0, // network: 0 mainnet, 1 testnet, 2 stagenet
   privateSpendKeyHex,
   privateViewKeyHex,
-  restoreHeight,              // first block to scan
+  restoreHeight, // first block to scan
   recipientAddress,
-  '1000000000000',            // 1 XMR, in atomic units
-  true                        // relay: false builds and signs without broadcasting
+  '1000000000000', // 1 XMR, in atomic units
+  true, // relay: false builds and signs without broadcasting
 );
 // tx: { hash, feeAtomic, amountAtomic, balanceAtomic, relayed, txHex }
 ```
@@ -128,19 +137,19 @@ Keys are 32-byte hex strings. `network` is `0` mainnet, `1` testnet, `2` stagene
 uses mainnet addresses). Amounts are decimal strings of atomic units (1 XMR = 10¹² atomic
 units).
 
-| Function | Returns | Network access |
-|---|---|---|
-| `publicKeyFromPrivate(privateKeyHex)` | public key hex | no |
-| `primaryAddress(network, publicSpendKeyHex, privateViewKeyHex)` | primary address | no |
-| `isValidAddress(network, address)` | `boolean` | no |
-| `daemonHeight(url, username?, password?)` | chain height (number of blocks) | yes |
-| `daemonNetwork(url, username?, password?)` | `mainnet`, `testnet`, `stagenet`, or `regtest` (daemon `fakechain`) | yes |
-| `relayTransaction(url, username?, password?, txHex)` | hash of the exact signed transaction broadcast | yes |
-| `setDiagnosticsEnabled(enabled)` | enables opt-in scan-stage and panic-source-location console logs | no |
-| `scanFunding(url, username, password, publicSpendKeyHex, privateViewKeyHex, restoreHeight, options?)` | `{ receivedAtomic, matureAtomic, lockedAtomic, scannedHeight, spentStatusKnown: false }` | yes |
-| `unlockedBalance(url, username?, password?, privateSpendKeyHex, privateViewKeyHex, restoreHeight, options?)` | spendable balance (string) | yes |
-| `createTransaction(url, username?, password?, network, privateSpendKeyHex, privateViewKeyHex, restoreHeight, recipient, amountAtomic, relay)` | `{ hash, feeAtomic, amountAtomic, balanceAtomic, relayed, txHex }` | yes |
-| `sweepTransaction(url, username?, password?, network, privateSpendKeyHex, privateViewKeyHex, restoreHeight, recipient, relay)` | same as `createTransaction`; `amountAtomic` is the balance minus the fee | yes |
+| Function                                                                                                                                      | Returns                                                                                  | Network access |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | -------------- |
+| `publicKeyFromPrivate(privateKeyHex)`                                                                                                         | public key hex                                                                           | no             |
+| `primaryAddress(network, publicSpendKeyHex, privateViewKeyHex)`                                                                               | primary address                                                                          | no             |
+| `isValidAddress(network, address)`                                                                                                            | `boolean`                                                                                | no             |
+| `daemonHeight(url, username?, password?)`                                                                                                     | chain height (number of blocks)                                                          | yes            |
+| `daemonNetwork(url, username?, password?)`                                                                                                    | `mainnet`, `testnet`, `stagenet`, or `regtest` (daemon `fakechain`)                      | yes            |
+| `relayTransaction(url, username?, password?, txHex)`                                                                                          | hash of the exact signed transaction broadcast                                           | yes            |
+| `setDiagnosticsEnabled(enabled)`                                                                                                              | enables opt-in scan-stage and panic-source-location console logs                         | no             |
+| `scanFunding(url, username, password, publicSpendKeyHex, privateViewKeyHex, restoreHeight, options?)`                                         | `{ receivedAtomic, matureAtomic, lockedAtomic, scannedHeight, spentStatusKnown: false }` | yes            |
+| `unlockedBalance(url, username?, password?, privateSpendKeyHex, privateViewKeyHex, restoreHeight, options?)`                                  | spendable balance (string)                                                               | yes            |
+| `createTransaction(url, username?, password?, network, privateSpendKeyHex, privateViewKeyHex, restoreHeight, recipient, amountAtomic, relay)` | `{ hash, feeAtomic, amountAtomic, balanceAtomic, relayed, txHex }`                       | yes            |
+| `sweepTransaction(url, username?, password?, network, privateSpendKeyHex, privateViewKeyHex, restoreHeight, recipient, relay)`                | same as `createTransaction`; `amountAtomic` is the balance minus the fee                 | yes            |
 
 `unlockedBalance` needs the private spend key because spent outputs are detected by computing
 their key images.
@@ -217,6 +226,7 @@ exceed the maximum transaction size; the call then fails with "too large of a tr
 ## Building
 
 Requirements:
+
 - Rust 1.89 or newer (CI uses 1.93.0) with the `wasm32-unknown-unknown` target.
 - `wasm-bindgen-cli` at **exactly** the `wasm-bindgen` version in `Cargo.lock` (currently
   0.2.129).
@@ -228,6 +238,7 @@ cargo install wasm-bindgen-cli --version 0.2.129 --locked
 ```
 
 `scripts/build.sh` writes:
+
 - `pkg/`: the ES-module npm package (`--target web`) with a generated `package.json`.
 - `pkg-node/`: a CommonJS build used by the tests.
 
@@ -241,16 +252,17 @@ Unit tests cover address derivation and the login code, including the HTTP Diges
 RFC 2617.
 
 The tests in `tests/` run against a real Monero regtest network and need extra setup:
+
 - [`tsx`](https://github.com/privatenumber/tsx) to run them.
 - A checkout of zebgen next to this repo (`../zebgen`), since they use its key code.
 - For the send tests: `monerod --regtest` with unrestricted RPC at `127.0.0.1:18081`, and
   `monero-wallet-rpc` (`--disable-rpc-login`) at `127.0.0.1:18083`.
 
-| Test | What it checks |
-|---|---|
-| `tests/crossCheckAddresses.mts` | 200 random key sets give identical public keys and addresses in this package and zebgen's TypeScript code, on all three networks. No node needed. |
-| `tests/regtestSend.mts` | Mines coins, scans, sends 1 XMR, and checks the sender's change. The recipient's balance is confirmed independently by Monero's own wallet (`monero-wallet-rpc`). |
-| `tests/authRestrictedSend.mts` | The full send through a `--restricted-rpc` port, against a throwaway `monerod` (command in the file's header). |
+| Test                            | What it checks                                                                                                                                                    |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/crossCheckAddresses.mts` | 200 random key sets give identical public keys and addresses in this package and zebgen's TypeScript code, on all three networks. No node needed.                 |
+| `tests/regtestSend.mts`         | Mines coins, scans, sends 1 XMR, and checks the sender's change. The recipient's balance is confirmed independently by Monero's own wallet (`monero-wallet-rpc`). |
+| `tests/authRestrictedSend.mts`  | The full send through a `--restricted-rpc` port, against a throwaway `monerod` (command in the file's header).                                                    |
 
 ## Releasing
 
@@ -259,12 +271,12 @@ Releases are automatic. Every push to `main` runs the
 [semantic-release](https://semantic-release.gitbook.io/) to pick the next version from
 [Conventional Commits](https://www.conventionalcommits.org/):
 
-| Commit | Release |
-|---|---|
-| `fix: ...` | patch (0.1.0 → 0.1.1) |
-| `feat: ...` | minor (0.1.0 → 0.2.0) |
-| `feat!: ...` or a `BREAKING CHANGE:` footer | major (0.x → 1.0.0) |
-| `docs:`, `ci:`, `chore:`, `test:`, ... | no release |
+| Commit                                      | Release               |
+| ------------------------------------------- | --------------------- |
+| `fix: ...`                                  | patch (0.1.0 → 0.1.1) |
+| `feat: ...`                                 | minor (0.1.0 → 0.2.0) |
+| `feat!: ...` or a `BREAKING CHANGE:` footer | major (0.x → 1.0.0)   |
+| `docs:`, `ci:`, `chore:`, `test:`, ...      | no release            |
 
 When a release is due, the workflow runs `cargo test`, writes the new version into
 `Cargo.toml`, rebuilds `pkg/` from source, publishes it to npm (trusted publishing, no stored

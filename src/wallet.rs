@@ -218,6 +218,39 @@ pub async fn unlocked_balance<T: HttpTransport>(
     Ok(unspent.iter().map(|o| o.commitment().amount).sum())
 }
 
+fn next_scan_gap(
+    spans: &[(usize, usize, String)],
+    start: usize,
+    end: usize,
+) -> Option<(usize, usize)> {
+    let mut cursor = start;
+    for (from, to, _) in spans {
+        if *to <= cursor {
+            continue;
+        }
+        if *from > cursor {
+            return (cursor < end).then_some((cursor, (*from).min(end)));
+        }
+        cursor = cursor.max(*to);
+    }
+    (cursor < end).then_some((cursor, end))
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::next_scan_gap;
+
+    #[test]
+    fn scans_only_missing_intervals() {
+        let spans = vec![(1000, 2000, String::new()), (2500, 3000, String::new())];
+        assert_eq!(next_scan_gap(&spans, 1000, 3000), Some((2000, 2500)));
+        assert_eq!(next_scan_gap(&spans, 2500, 3000), None);
+        assert_eq!(next_scan_gap(&spans, 0, 3000), Some((0, 1000)));
+        assert_eq!(next_scan_gap(&spans, 3000, 3100), Some((3000, 3100)));
+        assert_eq!(next_scan_gap(&spans, 0, 500), Some((0, 500)));
+    }
+}
+
 pub async fn balance_batch<T: HttpTransport>(
     daemon: &MoneroDaemon<T>,
     spend_key: &Zeroizing<Scalar>,
@@ -237,34 +270,63 @@ pub async fn balance_batch<T: HttpTransport>(
         Some(text) => {
             serde_json::from_str::<serde_json::Value>(text).map_err(|error| error.to_string())?
         }
-        None => serde_json::json!({"version": 1, "nextHeight": restore_height, "outputs": []}),
+        None => serde_json::json!({"version": 2, "spans": [], "outputs": []}),
     };
     let identity = hex::encode(public_key(spend_key).compress().to_bytes());
     let view_identity = hex::encode(public_key(&view_key).compress().to_bytes());
     if saved.is_some()
         && (state["publicSpendKey"].as_str() != Some(&identity)
-            || state["publicViewKey"].as_str() != Some(&view_identity)
-            || state["restoreHeight"].as_u64() != Some(restore_height as u64))
+            || state["publicViewKey"].as_str() != Some(&view_identity))
     {
-        return Err("scan checkpoint belongs to another wallet or restore height".into());
+        return Err("scan checkpoint belongs to another wallet".into());
     }
-    if state["version"].as_u64() != Some(1) {
+    if state["version"].as_u64() == Some(1) {
+        let start = state["restoreHeight"]
+            .as_u64()
+            .ok_or("invalid legacy restore height")?;
+        let end = state["nextHeight"]
+            .as_u64()
+            .ok_or("invalid legacy scan height")?;
+        if start > end {
+            return Err("invalid legacy scan range".into());
+        }
+        state["spans"] = if start < end {
+            serde_json::json!([{ "start": start, "end": end, "anchorHash": state["anchorHash"] }])
+        } else {
+            serde_json::json!([])
+        };
+        state["version"] = 2.into();
+    }
+    if state["version"].as_u64() != Some(2) {
         return Err("invalid scan checkpoint version".into());
     }
-    let mut next = state["nextHeight"]
-        .as_u64()
-        .ok_or("invalid scan checkpoint height")? as usize;
-    if next < restore_height {
-        return Err("invalid scan checkpoint start".into());
+    let mut spans = Vec::new();
+    for span in state["spans"].as_array().ok_or("invalid scan spans")? {
+        let start = span["start"].as_u64().ok_or("invalid scan span start")? as usize;
+        let end = span["end"].as_u64().ok_or("invalid scan span end")? as usize;
+        let anchor = span["anchorHash"]
+            .as_str()
+            .filter(|hash| hash.len() == 64)
+            .ok_or("invalid scan span anchor")?
+            .to_owned();
+        if start >= end
+            || spans
+                .last()
+                .is_some_and(|previous: &(usize, usize, String)| previous.1 >= start)
+        {
+            return Err("invalid or overlapping scan spans".into());
+        }
+        spans.push((start, end, anchor));
     }
-    if next > restore_height {
-        let matching = if next - 1 > tip {
+    for (_, end, anchor) in &spans {
+        check_cancelled()?;
+        let matching = if *end - 1 > tip {
             false
         } else {
             let response = daemon
                 .json_rpc_call(
                     "get_block_header_by_height",
-                    Some(serde_json::json!({"height": next - 1}).to_string()),
+                    Some(serde_json::json!({"height": *end - 1}).to_string()),
                     8192,
                 )
                 .await
@@ -273,25 +335,30 @@ pub async fn balance_batch<T: HttpTransport>(
                 serde_json::from_str(&response).map_err(|error| error.to_string())?;
             header["block_header"]["hash"]
                 .as_str()
-                .is_some_and(|hash| Some(hash) == state["anchorHash"].as_str())
+                .is_some_and(|hash| hash == anchor)
         };
         if !matching {
-            next = restore_height;
-            state = serde_json::json!({"version": 1, "nextHeight": next, "outputs": []});
+            state = serde_json::json!({"version": 2, "spans": [], "outputs": []});
+            spans.clear();
+            break;
         }
     }
     check_cancelled()?;
     let pair = ViewPair::new(public_key(spend_key), view_key).map_err(|error| error.to_string())?;
     let mut scanner = Scanner::new(pair);
-    let expected_previous = state["anchorHash"].as_str().map(str::to_owned);
+    let gap = next_scan_gap(&spans, restore_height, tip + 1);
     let entries = state["outputs"]
         .as_array_mut()
         .ok_or("invalid output checkpoint")?;
-    let mut scanned_anchor = None;
-    if next <= tip {
-        let end = (next + SCAN_BATCH - 1).min(tip);
+    if let Some((next, gap_end)) = gap {
+        let end = (next + SCAN_BATCH).min(gap_end);
+        let expected_previous = spans
+            .iter()
+            .find(|span| span.1 == next)
+            .map(|span| span.2.clone());
+        let mut scanned_anchor = None;
         let blocks = daemon
-            .contiguous_scannable_blocks(next..=end)
+            .contiguous_scannable_blocks(next..=end - 1)
             .await
             .map_err(|error| error.to_string())?;
         check_cancelled()?;
@@ -306,7 +373,7 @@ pub async fn balance_batch<T: HttpTransport>(
                     "chain reorganized at scan boundary; retry from the last checkpoint".into(),
                 );
             }
-            if height == end {
+            if height == end - 1 {
                 scanned_anchor = Some(hex::encode(block.block.hash()));
             }
             for output in scanner
@@ -317,17 +384,28 @@ pub async fn balance_batch<T: HttpTransport>(
                 entries.push(serde_json::json!({"height": height, "output": hex::encode(output.serialize())}));
             }
         }
-        if scanned_anchor.is_none() {
-            return Err("daemon omitted scan batch blocks".into());
+        let anchor = scanned_anchor.ok_or("daemon omitted scan batch blocks")?;
+        spans.push((next, end, anchor));
+        spans.sort_by_key(|span| span.0);
+        let mut merged: Vec<(usize, usize, String)> = Vec::new();
+        for span in spans {
+            if let Some(previous) = merged.last_mut().filter(|previous| previous.1 == span.0) {
+                previous.1 = span.1;
+                previous.2 = span.2;
+            } else {
+                merged.push(span);
+            }
         }
-        next = end + 1;
+        spans = merged;
     }
+    let next = next_scan_gap(&spans, restore_height, tip + 1).map_or(tip + 1, |gap| gap.0);
     let mut mature = vec![];
+    let mut locked = vec![];
     for entry in entries.iter() {
         let height = entry["height"]
             .as_u64()
             .ok_or("invalid saved output height")? as usize;
-        if height < restore_height || height >= next {
+        if !spans.iter().any(|span| height >= span.0 && height < span.1) {
             return Err("saved output outside scanned range".into());
         }
         let bytes = Zeroizing::new(
@@ -343,8 +421,21 @@ pub async fn balance_batch<T: HttpTransport>(
             && output.additional_timelock() <= Timelock::Block(tip)
         {
             mature.push(output);
+        } else {
+            locked.push(output);
         }
     }
+    let locked_balance = if next == tip + 1 {
+        filter_unspent(daemon, spend_key, locked)
+            .await?
+            .iter()
+            .try_fold(0u64, |total, output| {
+                total.checked_add(output.commitment().amount)
+            })
+            .ok_or("locked balance overflow")?
+    } else {
+        0
+    };
     let balance = if next == tip + 1 {
         filter_unspent(daemon, spend_key, mature)
             .await?
@@ -356,11 +447,12 @@ pub async fn balance_batch<T: HttpTransport>(
     } else {
         0
     };
-    if next > restore_height {
+    for (_, end, expected_anchor) in &spans {
+        check_cancelled()?;
         let response = daemon
             .json_rpc_call(
                 "get_block_header_by_height",
-                Some(serde_json::json!({"height": next - 1}).to_string()),
+                Some(serde_json::json!({"height": *end - 1}).to_string()),
                 8192,
             )
             .await
@@ -371,29 +463,17 @@ pub async fn balance_batch<T: HttpTransport>(
             .as_str()
             .filter(|hash| hash.len() == 64)
             .ok_or("invalid scan anchor hash")?;
-        if scanned_anchor
-            .as_ref()
-            .is_some_and(|scanned| scanned != anchor)
-        {
+        if expected_anchor != anchor {
             return Err("chain reorganized during scan; retry from the last checkpoint".into());
         }
-        if scanned_anchor.is_none()
-            && expected_previous
-                .as_ref()
-                .is_some_and(|expected| expected != anchor)
-        {
-            return Err(
-                "chain reorganized during spent check; retry from the last checkpoint".into(),
-            );
-        }
-        state["anchorHash"] = anchor.into();
     }
     state["publicSpendKey"] = identity.into();
     state["publicViewKey"] = view_identity.into();
     state["restoreHeight"] = restore_height.into();
     state["nextHeight"] = next.into();
+    state["spans"] = spans.iter().map(|(start, end, anchor)| serde_json::json!({"start": start, "end": end, "anchorHash": anchor})).collect();
     check_cancelled()?;
-    Ok(serde_json::json!({"checkpoint": state, "scannedHeight": next, "targetHeight": tip + 1, "done": next == tip + 1, "balanceAtomic": balance.to_string()}).to_string())
+    Ok(serde_json::json!({"checkpoint": state, "scannedHeight": next, "targetHeight": tip + 1, "done": next == tip + 1, "balanceAtomic": balance.to_string(), "lockedAtomic": locked_balance.to_string()}).to_string())
 }
 
 /// Builds and signs a payment of `amount`, or of the whole unlocked balance minus the fee when
