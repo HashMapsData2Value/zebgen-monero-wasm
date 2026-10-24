@@ -1,3 +1,10 @@
+# [0.6.0](https://github.com/HashMapsData2Value/zebgen-monero-wasm/compare/v0.5.0...v0.6.0) (2026-10-24)
+
+
+### Features
+
+* **scanner:** expose locked balances and reuse scanned spans ([463f209](https://github.com/HashMapsData2Value/zebgen-monero-wasm/commit/463f20943ec169517f8edad25473c3ae9eb1f94a))
+
 # [0.5.0](https://github.com/HashMapsData2Value/zebgen-monero-wasm/compare/v0.4.0...v0.5.0) (2026-10-19)
 
 
