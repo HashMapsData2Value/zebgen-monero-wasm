@@ -137,19 +137,19 @@ Keys are 32-byte hex strings. `network` is `0` mainnet, `1` testnet, `2` stagene
 uses mainnet addresses). Amounts are decimal strings of atomic units (1 XMR = 10¹² atomic
 units).
 
-| Function                                                                                                                                      | Returns                                                                                  | Network access |
-| --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | -------------- |
-| `publicKeyFromPrivate(privateKeyHex)`                                                                                                         | public key hex                                                                           | no             |
-| `primaryAddress(network, publicSpendKeyHex, privateViewKeyHex)`                                                                               | primary address                                                                          | no             |
-| `isValidAddress(network, address)`                                                                                                            | `boolean`                                                                                | no             |
-| `daemonHeight(url, username?, password?)`                                                                                                     | chain height (number of blocks)                                                          | yes            |
-| `daemonNetwork(url, username?, password?)`                                                                                                    | `mainnet`, `testnet`, `stagenet`, or `regtest` (daemon `fakechain`)                      | yes            |
-| `relayTransaction(url, username?, password?, txHex)`                                                                                          | hash of the exact signed transaction broadcast                                           | yes            |
-| `setDiagnosticsEnabled(enabled)`                                                                                                              | enables opt-in scan-stage and panic-source-location console logs                         | no             |
-| `scanFunding(url, username, password, publicSpendKeyHex, privateViewKeyHex, restoreHeight, options?)`                                         | `{ receivedAtomic, matureAtomic, lockedAtomic, scannedHeight, spentStatusKnown: false }` | yes            |
-| `unlockedBalance(url, username?, password?, privateSpendKeyHex, privateViewKeyHex, restoreHeight, options?)`                                  | spendable balance (string)                                                               | yes            |
-| `createTransaction(url, username?, password?, network, privateSpendKeyHex, privateViewKeyHex, restoreHeight, recipient, amountAtomic, relay)` | `{ hash, feeAtomic, amountAtomic, balanceAtomic, relayed, txHex }`                       | yes            |
-| `sweepTransaction(url, username?, password?, network, privateSpendKeyHex, privateViewKeyHex, restoreHeight, recipient, relay)`                | same as `createTransaction`; `amountAtomic` is the balance minus the fee                 | yes            |
+| Function                                                                                                                                                   | Returns                                                                                  | Network access |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | -------------- |
+| `publicKeyFromPrivate(privateKeyHex)`                                                                                                                      | public key hex                                                                           | no             |
+| `primaryAddress(network, publicSpendKeyHex, privateViewKeyHex)`                                                                                            | primary address                                                                          | no             |
+| `isValidAddress(network, address)`                                                                                                                         | `boolean`                                                                                | no             |
+| `daemonHeight(url, username?, password?)`                                                                                                                  | chain height (number of blocks)                                                          | yes            |
+| `daemonNetwork(url, username?, password?)`                                                                                                                 | `mainnet`, `testnet`, `stagenet`, or `regtest` (daemon `fakechain`)                      | yes            |
+| `relayTransaction(url, username?, password?, txHex)`                                                                                                       | hash of the exact signed transaction broadcast                                           | yes            |
+| `setDiagnosticsEnabled(enabled)`                                                                                                                           | enables opt-in scan-stage and panic-source-location console logs                         | no             |
+| `scanFunding(url, username, password, publicSpendKeyHex, privateViewKeyHex, restoreHeight, options?)`                                                      | `{ receivedAtomic, matureAtomic, lockedAtomic, scannedHeight, spentStatusKnown: false }` | yes            |
+| `unlockedBalance(url, username?, password?, privateSpendKeyHex, privateViewKeyHex, restoreHeight, options?)`                                               | spendable balance (string)                                                               | yes            |
+| `createTransaction(url, username?, password?, network, privateSpendKeyHex, privateViewKeyHex, restoreHeight, recipient, amountAtomic, relay, checkpoint?)` | `{ hash, feeAtomic, amountAtomic, balanceAtomic, relayed, txHex, checkpoint? }`          | yes            |
+| `sweepTransaction(url, username?, password?, network, privateSpendKeyHex, privateViewKeyHex, restoreHeight, recipient, relay, checkpoint?)`                | same as `createTransaction`; `amountAtomic` is the balance minus the fee                 | yes            |
 
 `unlockedBalance` needs the private spend key because spent outputs are detected by computing
 their key images.
@@ -247,6 +247,22 @@ cargo install wasm-bindgen-cli --version 0.2.129 --locked
 ```sh
 cargo test
 ```
+
+After `./scripts/build.sh`, funded checkpoint tests run without sibling repos
+or access to an existing chain:
+
+```sh
+docker build -t zebgen-monero-test -f tests/monero.Dockerfile .
+MONERO_TEST_IMAGE=zebgen-monero-test node --test tests/fundedTransactionCheckpoint.cjs
+```
+
+The test uses fresh disposable daemon and wallet-RPC containers with random
+loopback ports and no mounted volumes. It mines and sends only its own regtest
+coins, then removes the containers. It checks cached payment and sweep signing,
+fee/change accounting, mempool/on-chain spent detection, maturity, absence of
+historical downloads for warm coverage, and independent wallet2 balances.
+Release CI runs this test before publication. Set `MONERO_TEST_IMAGE` to an
+existing image containing `monerod` and `monero-wallet-rpc` to avoid rebuilding.
 
 Unit tests cover address derivation and the login code, including the HTTP Digest example from
 RFC 2617.

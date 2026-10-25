@@ -48,6 +48,12 @@ jobs:
       # Builds pkg/ so semantic-release's npm plugin can verify it; rebuilt with the new version on release.
       - run: ./scripts/build.sh
 
+      - name: Build isolated Monero test image
+        run: docker build -t zebgen-monero-test -f tests/monero.Dockerfile .
+      - name: Test funded cached transaction preparation
+        run: node --test tests/fundedTransactionCheckpoint.cjs
+        env:
+          MONERO_TEST_IMAGE: zebgen-monero-test
       - run: npm ci
       - run: npx semantic-release
         env:

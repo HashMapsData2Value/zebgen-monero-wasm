@@ -19,6 +19,11 @@ fn js_err(message: impl core::fmt::Display) -> JsError {
     JsError::new(&message.to_string())
 }
 
+#[wasm_bindgen(js_name = transactionCheckpointVersion)]
+pub fn transaction_checkpoint_version() -> u32 {
+    2
+}
+
 #[wasm_bindgen(js_name = setDiagnosticsEnabled)]
 pub fn set_diagnostics_enabled(enabled: bool) {
     diagnostics::set_enabled(enabled);
@@ -347,6 +352,7 @@ pub async fn create_transaction(
     recipient: String,
     amount_atomic: String,
     relay: bool,
+    checkpoint: Option<String>,
 ) -> Result<JsValue, JsError> {
     let amount: u64 = amount_atomic
         .parse()
@@ -365,6 +371,7 @@ pub async fn create_transaction(
         recipient,
         Some(amount),
         relay,
+        checkpoint,
     )
     .await
 }
@@ -385,6 +392,7 @@ pub async fn sweep_transaction(
     restore_height: u32,
     recipient: String,
     relay: bool,
+    checkpoint: Option<String>,
 ) -> Result<JsValue, JsError> {
     send(
         daemon_url,
@@ -397,6 +405,7 @@ pub async fn sweep_transaction(
         recipient,
         None,
         relay,
+        checkpoint,
     )
     .await
 }
@@ -413,6 +422,7 @@ async fn send(
     recipient: String,
     amount: Option<u64>,
     relay: bool,
+    checkpoint: Option<String>,
 ) -> Result<JsValue, JsError> {
     let network = network_from_u8(network).map_err(js_err)?;
     let spend = scalar_from_hex("private spend key", &private_spend_key_hex).map_err(js_err)?;
@@ -427,6 +437,7 @@ async fn send(
         restore_height as usize,
         &recipient,
         amount,
+        checkpoint.as_deref(),
     )
     .await
     .map_err(js_err)?;
@@ -445,6 +456,10 @@ async fn send(
         .and_then(|()| set("relayed", relay.into()))
         .and_then(|()| set("txHex", hex::encode(built.transaction.serialize()).into()))
         .map_err(|_| js_err("failed to build result object"))?;
+    if let Some(checkpoint) = built.checkpoint {
+        set("checkpoint", checkpoint.into())
+            .map_err(|_| js_err("failed to build checkpoint result"))?;
+    }
     Ok(result.into())
 }
 

@@ -35,6 +35,7 @@ pub struct BuiltTransaction {
     pub amount: u64,
     pub fee: u64,
     pub unlocked_balance: u64,
+    pub checkpoint: Option<String>,
 }
 
 pub struct Funding {
@@ -284,6 +285,26 @@ pub async fn balance_batch<T: HttpTransport>(
     saved: Option<&str>,
     check_cancelled: impl Fn() -> Result<(), String>,
 ) -> Result<String, String> {
+    balance_batch_outputs(
+        daemon,
+        spend_key,
+        view_key,
+        restore_height,
+        saved,
+        check_cancelled,
+    )
+    .await
+    .map(|(result, _)| result)
+}
+
+async fn balance_batch_outputs<T: HttpTransport>(
+    daemon: &MoneroDaemon<T>,
+    spend_key: &Zeroizing<Scalar>,
+    view_key: Zeroizing<Scalar>,
+    restore_height: usize,
+    saved: Option<&str>,
+    check_cancelled: impl Fn() -> Result<(), String>,
+) -> Result<(String, Vec<WalletOutput>), String> {
     let tip = daemon
         .latest_block_number()
         .await
@@ -468,9 +489,13 @@ pub async fn balance_batch<T: HttpTransport>(
     } else {
         0
     };
+    let spendable = if next == tip + 1 {
+        filter_unspent(daemon, spend_key, mature).await?
+    } else {
+        vec![]
+    };
     let balance = if next == tip + 1 {
-        filter_unspent(daemon, spend_key, mature)
-            .await?
+        spendable
             .iter()
             .try_fold(0u64, |total, output| {
                 total.checked_add(output.commitment().amount)
@@ -506,7 +531,7 @@ pub async fn balance_batch<T: HttpTransport>(
     state["spans"] = spans.iter().map(|(start, end, anchor)| serde_json::json!({"start": start, "end": end, "anchorHash": anchor})).collect();
     check_cancelled()?;
     let unlocks: Vec<_> = unlock_schedule.into_iter().map(|(height, amount)| serde_json::json!({"height": height, "amountAtomic": amount.to_string()})).collect();
-    Ok(serde_json::json!({"checkpoint": state, "scannedHeight": next, "targetHeight": tip + 1, "done": next == tip + 1, "balanceAtomic": balance.to_string(), "lockedAtomic": locked_balance.to_string(), "unlocks": unlocks}).to_string())
+    Ok((serde_json::json!({"checkpoint": state, "scannedHeight": next, "targetHeight": tip + 1, "done": next == tip + 1, "balanceAtomic": balance.to_string(), "lockedAtomic": locked_balance.to_string(), "unlocks": unlocks}).to_string(), spendable))
 }
 
 /// Builds and signs a payment of `amount`, or of the whole unlocked balance minus the fee when
@@ -520,18 +545,46 @@ pub async fn build_transaction<T: HttpTransport>(
     restore_height: usize,
     recipient: &str,
     amount: Option<u64>,
+    checkpoint: Option<&str>,
 ) -> Result<BuiltTransaction, String> {
     let recipient = MoneroAddress::from_str(network, recipient)
         .map_err(|e| format!("invalid recipient address: {e}"))?;
-    let pair = ViewPair::new(public_key(spend_key), view_key).map_err(|e| e.to_string())?;
+    let pair = ViewPair::new(public_key(spend_key), view_key.clone()).map_err(|e| e.to_string())?;
+    let mut updated_checkpoint = None;
+    let mut outputs = if let Some(saved) = checkpoint {
+        let mut saved = saved.to_owned();
+        loop {
+            let (result, outputs) = balance_batch_outputs(
+                daemon,
+                spend_key,
+                view_key.clone(),
+                restore_height,
+                Some(&saved),
+                || Ok(()),
+            )
+            .await?;
+            let result: serde_json::Value =
+                serde_json::from_str(&result).map_err(|error| error.to_string())?;
+            if result["done"].as_bool() == Some(true) {
+                updated_checkpoint = Some(result["checkpoint"].to_string());
+                break outputs;
+            }
+            saved = result["checkpoint"].to_string();
+        }
+    } else {
+        let tip = daemon
+            .latest_block_number()
+            .await
+            .map_err(|e| e.to_string())?;
+        let outputs =
+            scan_unlocked(daemon, &pair, restore_height, tip, || Ok(()), |_, _| Ok(())).await?;
+        filter_unspent(daemon, spend_key, outputs).await?
+    };
     let tip = daemon
         .latest_block_number()
         .await
         .map_err(|e| e.to_string())?;
 
-    let outputs =
-        scan_unlocked(daemon, &pair, restore_height, tip, || Ok(()), |_, _| Ok(())).await?;
-    let mut outputs = filter_unspent(daemon, spend_key, outputs).await?;
     let unlocked_balance: u64 = outputs.iter().map(|o| o.commitment().amount).sum();
     outputs.sort_by_key(|o| Reverse(o.commitment().amount));
 
@@ -588,6 +641,7 @@ pub async fn build_transaction<T: HttpTransport>(
             amount,
             fee,
             unlocked_balance,
+            checkpoint: updated_checkpoint,
         });
     };
 
@@ -625,6 +679,7 @@ pub async fn build_transaction<T: HttpTransport>(
         amount,
         fee,
         unlocked_balance,
+        checkpoint: updated_checkpoint,
     })
 }
 
