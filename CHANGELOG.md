@@ -1,3 +1,16 @@
+# [0.8.0](https://github.com/HashMapsData2Value/zebgen-monero-wasm/compare/v0.7.0...v0.8.0) (2026-10-25)
+
+
+### Bug Fixes
+
+* **ci:** allow slow Monero startup and retain failure diagnostics ([5827f8c](https://github.com/HashMapsData2Value/zebgen-monero-wasm/commit/5827f8cec320a93b856e37b757b5a768335cb518))
+* **ci:** pin compatible Monero binaries for funded regtest ([e5b25ee](https://github.com/HashMapsData2Value/zebgen-monero-wasm/commit/e5b25eefcabd436b48273108d2371af1b7fc624b))
+
+
+### Features
+
+* **wallet:** reuse validated scan checkpoints for transaction signing ([dbc3a75](https://github.com/HashMapsData2Value/zebgen-monero-wasm/commit/dbc3a75c363ea653ec0e3fbe613f439fa41c0333))
+
 # [0.7.0](https://github.com/HashMapsData2Value/zebgen-monero-wasm/compare/v0.6.0...v0.7.0) (2026-10-25)
 
 
