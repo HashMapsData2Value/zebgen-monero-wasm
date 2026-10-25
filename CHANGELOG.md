@@ -1,3 +1,10 @@
+# [0.7.0](https://github.com/HashMapsData2Value/zebgen-monero-wasm/compare/v0.6.0...v0.7.0) (2026-10-25)
+
+
+### Features
+
+* **scanner:** expose locked output unlock heights ([dfcb526](https://github.com/HashMapsData2Value/zebgen-monero-wasm/commit/dfcb526ea3efc227e9f801448772797f4b37afa3))
+
 # [0.6.0](https://github.com/HashMapsData2Value/zebgen-monero-wasm/compare/v0.5.0...v0.6.0) (2026-10-24)
 
 
