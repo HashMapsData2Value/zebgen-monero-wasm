@@ -28,7 +28,7 @@ test(
       return body.result;
     };
     const ready = async (url, method) => {
-      const deadline = Date.now() + 15_000;
+      const deadline = Date.now() + 60_000;
       for (;;) {
         try {
           return await rpc(url, method);
@@ -106,7 +106,6 @@ test(
       docker(
         'run',
         '-d',
-        '--rm',
         '--pull=never',
         '--name',
         name,
@@ -135,7 +134,6 @@ test(
       docker(
         'run',
         '-d',
-        '--rm',
         '--pull=never',
         '--name',
         walletName,
@@ -233,6 +231,15 @@ test(
       const swept = await scan(recipient, JSON.parse(sweep.checkpoint));
       assert.equal(swept.balanceAtomic, '0');
       await independentlyCheckBalance(destination, 'destination', BigInt(sweep.amountAtomic));
+    } catch (error) {
+      for (const container of [name, walletName]) {
+        try {
+          console.error(`Test container ${container}:\n${docker('logs', container)}`);
+        } catch (logError) {
+          console.error(`Unable to read test container ${container} logs`, logError);
+        }
+      }
+      throw error;
     } finally {
       globalThis.fetch = originalFetch;
       for (const container of [walletName, name]) {
