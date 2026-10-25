@@ -21,6 +21,15 @@ const RING_LEN: u8 = 16;
 // Leaves room for regtest/young chains (high block reward -> ~4.7M "normal" on our regtest).
 const MAX_FEE_PER_WEIGHT: u64 = 10_000_000;
 
+fn output_unlock_height(height: usize, timelock: Timelock) -> Option<usize> {
+    let maturity = height + DEFAULT_LOCK_WINDOW - 1;
+    match timelock {
+        Timelock::Block(block) => Some(maturity.max(block)),
+        Timelock::None => Some(maturity),
+        _ => None,
+    }
+}
+
 pub struct BuiltTransaction {
     pub transaction: Transaction,
     pub amount: u64,
@@ -238,6 +247,22 @@ fn next_scan_gap(
 
 #[cfg(test)]
 mod coverage_tests {
+    #[test]
+    fn unlock_height_matches_maturity_boundary_and_additional_lock() {
+        let height = 100;
+        let unlock = super::output_unlock_height(height, super::Timelock::None).unwrap();
+        assert_eq!(unlock, height + super::DEFAULT_LOCK_WINDOW - 1);
+        assert!(height + super::DEFAULT_LOCK_WINDOW > unlock);
+        assert_eq!(height + super::DEFAULT_LOCK_WINDOW, unlock + 1);
+        assert_eq!(
+            super::output_unlock_height(height, super::Timelock::Block(200)),
+            Some(200)
+        );
+        assert_eq!(
+            super::output_unlock_height(height, super::Timelock::Block(50)),
+            Some(unlock)
+        );
+    }
     use super::next_scan_gap;
 
     #[test]
@@ -401,6 +426,7 @@ pub async fn balance_batch<T: HttpTransport>(
     let next = next_scan_gap(&spans, restore_height, tip + 1).map_or(tip + 1, |gap| gap.0);
     let mut mature = vec![];
     let mut locked = vec![];
+    let mut unlock_heights = std::collections::BTreeMap::new();
     for entry in entries.iter() {
         let height = entry["height"]
             .as_u64()
@@ -422,14 +448,20 @@ pub async fn balance_batch<T: HttpTransport>(
         {
             mature.push(output);
         } else {
+            let unlock_height = output_unlock_height(height, output.additional_timelock());
+            unlock_heights.insert(output.serialize(), unlock_height);
             locked.push(output);
         }
     }
+    let mut unlock_schedule = std::collections::BTreeMap::<Option<usize>, u64>::new();
     let locked_balance = if next == tip + 1 {
         filter_unspent(daemon, spend_key, locked)
             .await?
             .iter()
             .try_fold(0u64, |total, output| {
+                let unlock_height = unlock_heights.get(&output.serialize()).copied().flatten();
+                let amount = unlock_schedule.entry(unlock_height).or_default();
+                *amount = amount.checked_add(output.commitment().amount)?;
                 total.checked_add(output.commitment().amount)
             })
             .ok_or("locked balance overflow")?
@@ -473,7 +505,8 @@ pub async fn balance_batch<T: HttpTransport>(
     state["nextHeight"] = next.into();
     state["spans"] = spans.iter().map(|(start, end, anchor)| serde_json::json!({"start": start, "end": end, "anchorHash": anchor})).collect();
     check_cancelled()?;
-    Ok(serde_json::json!({"checkpoint": state, "scannedHeight": next, "targetHeight": tip + 1, "done": next == tip + 1, "balanceAtomic": balance.to_string(), "lockedAtomic": locked_balance.to_string()}).to_string())
+    let unlocks: Vec<_> = unlock_schedule.into_iter().map(|(height, amount)| serde_json::json!({"height": height, "amountAtomic": amount.to_string()})).collect();
+    Ok(serde_json::json!({"checkpoint": state, "scannedHeight": next, "targetHeight": tip + 1, "done": next == tip + 1, "balanceAtomic": balance.to_string(), "lockedAtomic": locked_balance.to_string(), "unlocks": unlocks}).to_string())
 }
 
 /// Builds and signs a payment of `amount`, or of the whole unlocked balance minus the fee when
