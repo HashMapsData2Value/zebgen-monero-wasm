@@ -1,3 +1,10 @@
+## [0.8.1](https://github.com/HashMapsData2Value/zebgen-monero-wasm/compare/v0.8.0...v0.8.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* **auth:** serialize Digest exchanges and authenticate receipt lookups ([880cdd6](https://github.com/HashMapsData2Value/zebgen-monero-wasm/commit/880cdd659b3ad0ff45736219e45d207ebad69493))
+
 # [0.8.0](https://github.com/HashMapsData2Value/zebgen-monero-wasm/compare/v0.7.0...v0.8.0) (2026-10-25)
 
 
