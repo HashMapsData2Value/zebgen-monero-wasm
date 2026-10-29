@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { setImmediate as nextTurn } from 'node:timers/promises';
 
 const require = createRequire(import.meta.url);
-const wasm = require('../target/transport-tests/zebgen_monero_wasm.js');
+const wasm = require('../pkg-node/zebgen_monero_wasm.js');
 const originalSetTimeout = globalThis.setTimeout;
 const originalClearTimeout = globalThis.clearTimeout;
 const timers = new Set();
@@ -103,6 +103,21 @@ try {
   });
 
   deadlineMs = 100;
+  let activeRequests = 0;
+  let peakRequests = 0;
+  await scenario('authenticated transports serialize concurrent callers through body completion', async (request, response) => {
+    activeRequests += 1;
+    peakRequests = Math.max(peakRequests, activeRequests);
+    response.once('finish', () => { activeRequests -= 1; });
+    response.write(' ');
+    await nextTurn();
+    success(request, response);
+  }, async (url) => {
+    const heights = await Promise.all(Array.from({ length: 8 }, () => wasm.daemonHeight(url, 'user', 'password')));
+    assert.deepEqual(heights, Array(8).fill(42));
+    assert.equal(peakRequests, 1);
+  });
+
   for (const stage of ['headers', 'body', 'challenge', 'retry body']) {
     let closed;
     const before = expired;

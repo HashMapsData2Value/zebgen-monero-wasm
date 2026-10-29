@@ -154,6 +154,34 @@ pub async fn daemon_height(
     Ok(height as f64)
 }
 
+#[wasm_bindgen(js_name = transactionStatus)]
+pub async fn transaction_status(
+    daemon_url: String,
+    username: Option<String>,
+    password: Option<String>,
+    hash: String,
+) -> Result<String, JsError> {
+    if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(js_err("Invalid Monero transaction hash."));
+    }
+    let daemon = connect(&daemon_url, username, password).await?;
+    daemon
+        .rpc_call(
+            "get_transactions",
+            Some(
+                serde_json::json!({
+                    "txs_hashes": [hash],
+                    "decode_as_json": false,
+                    "prune": true,
+                })
+                .to_string(),
+            ),
+            4 * 1024 * 1024,
+        )
+        .await
+        .map_err(js_err)
+}
+
 struct FundingControl {
     signal: Option<web_sys::AbortSignal>,
     on_progress: Option<Function>,

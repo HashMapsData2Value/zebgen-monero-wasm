@@ -1,5 +1,6 @@
 use core::future::Future;
 use std::sync::{Arc, Mutex};
+use std::{cell::RefCell, collections::HashMap};
 
 use js_sys::{Promise, Reflect, Uint8Array};
 use monero_daemon_rpc::HttpTransport;
@@ -28,6 +29,52 @@ extern "C" {
 }
 
 const REQUEST_TIMEOUT_MS: i32 = 60_000;
+
+thread_local! {
+    static AUTH_REQUESTS: RefCell<HashMap<String, Promise>> = RefCell::default();
+}
+
+struct AuthRequestGuard {
+    origin: String,
+    pending: Promise,
+    release: js_sys::Function,
+}
+
+impl AuthRequestGuard {
+    async fn acquire(url: &str) -> Self {
+        let origin = url.split('/').take(3).collect::<Vec<_>>().join("/");
+        let mut release = None;
+        let pending = Promise::new(&mut |resolve, _| release = Some(resolve));
+        let previous = AUTH_REQUESTS.with(|requests| {
+            requests
+                .borrow_mut()
+                .insert(origin.clone(), pending.clone())
+        });
+        let guard = Self {
+            origin,
+            pending,
+            release: release.expect("Promise executor runs synchronously"),
+        };
+        if let Some(previous) = previous {
+            let _ = JsFuture::from(previous).await;
+        }
+        guard
+    }
+}
+
+impl Drop for AuthRequestGuard {
+    fn drop(&mut self) {
+        AUTH_REQUESTS.with(|requests| {
+            let mut requests = requests.borrow_mut();
+            if requests.get(&self.origin).is_some_and(|pending| {
+                JsValue::from(pending.clone()) == JsValue::from(self.pending.clone())
+            }) {
+                requests.remove(&self.origin);
+            }
+        });
+        let _ = self.release.call0(&JsValue::UNDEFINED);
+    }
+}
 
 struct RequestDeadline {
     controller: AbortController,
@@ -246,6 +293,11 @@ impl FetchTransport {
         body: Vec<u8>,
         response_size_limit: Option<usize>,
     ) -> Result<Vec<u8>, InterfaceError> {
+        let _auth_request = if self.credentials.is_some() {
+            Some(AuthRequestGuard::acquire(&url).await)
+        } else {
+            None
+        };
         let mut deadline = RequestDeadline::new(self.signal.as_ref())?;
         let cached_authorization = self.next_authorization(&url);
         let mut response = fetch(&url, &body, cached_authorization.as_deref(), &deadline).await?;
