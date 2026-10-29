@@ -245,8 +245,34 @@ cargo install wasm-bindgen-cli --version 0.2.129 --locked
 ## Testing
 
 ```sh
-cargo test
+cargo test --locked --offline
 ```
+
+After building the current source, run all standalone tests using a cached image:
+
+```sh
+node tests/transportLimits.mjs
+../leakswap-all/leakswap-private/e2e-ui/node_modules/.bin/tsx tests/crossCheckAddresses.mts
+MONERO_TEST_IMAGE=docker-monerod node tests/runIsolated.cjs
+MONERO_TEST_IMAGE=docker-monerod node --test tests/fundedTransactionCheckpoint.cjs
+```
+
+`runIsolated.cjs` runs the seven chain-dependent files serially on its own fresh
+daemon and wallet RPC, including a restricted RPC port. It uses random loopback
+ports, `--pull=never`, no mounted volumes, and removes its containers in `finally`.
+It seeds 1,400 regtest blocks for the disjoint-coverage tests. It never uses the
+shared localhost daemon or wallets. Pass filenames to select a focused run, for
+example `node tests/runIsolated.cjs balanceBatch.cjs`. Set `TSX` to an installed
+tsx executable if it is not at the sibling path above. The TypeScript tests also
+require the sibling `../zebgen` checkout for independent key derivation.
+
+The seven files are `balanceBatch.cjs`, `balanceCancellation.cjs`,
+`scanCoverage.cjs`, `transactionCheckpoint.cjs`, `regtestFundingControl.mts`,
+`regtestSend.mts`, and `authRestrictedSend.mts`. Together with the three other
+standalone files above, these cover all test entry points under `tests/`.
+Individual chain tests accept `MONERO_TEST_DAEMON`; the send tests additionally
+accept `MONERO_TEST_WALLET_RPC` and `MONERO_TEST_RESTRICTED` as applicable.
+Their default ports are intended only for explicitly managed test chains.
 
 After `./scripts/build.sh`, funded checkpoint tests run without sibling repos
 or access to an existing chain:

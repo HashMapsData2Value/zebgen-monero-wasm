@@ -3,10 +3,10 @@ import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const wasm = require('../target/transport-tests/zebgen_monero_wasm.js');
+const wasm = require('../pkg-node/zebgen_monero_wasm.js');
 const privateKey = '01' + '00'.repeat(31);
 const publicKey = wasm.publicKeyFromPrivate(privateKey);
-const daemon = 'http://127.0.0.1:18081';
+const daemon = process.env.MONERO_TEST_DAEMON ?? 'http://127.0.0.1:18081';
 
 function trackedController() {
   const controller = new AbortController();

@@ -17,8 +17,8 @@ import {
 const require = createRequire(import.meta.url);
 const wasm = require('../pkg-node/zebgen_monero_wasm.js');
 
-const RESTRICTED = 'http://127.0.0.1:28089';
-const ADMIN = 'http://127.0.0.1:28081';
+const RESTRICTED = process.env.MONERO_TEST_RESTRICTED ?? 'http://127.0.0.1:28089';
+const ADMIN = process.env.MONERO_TEST_DAEMON ?? 'http://127.0.0.1:28081';
 const ONE_XMR = 1_000_000_000_000n;
 
 function expect(condition: boolean, message: string): void {

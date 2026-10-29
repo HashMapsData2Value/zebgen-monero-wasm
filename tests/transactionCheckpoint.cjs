@@ -3,7 +3,7 @@ const { test } = require('node:test');
 const wasm = require('../pkg-node/zebgen_monero_wasm.js');
 
 test('transaction preparation reuses coverage, scans deltas and rejects another wallet without relay', async () => {
-  const daemon = 'http://127.0.0.1:18081';
+  const daemon = process.env.MONERO_TEST_DAEMON ?? 'http://127.0.0.1:18081';
   const spend = '01' + '00'.repeat(31);
   const view = '02' + '00'.repeat(31);
   const recipient = wasm.primaryAddress(0, wasm.publicKeyFromPrivate(spend), view);

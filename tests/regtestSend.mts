@@ -1,7 +1,7 @@
 // End-to-end send on the docker regtest chain using only the wasm build for wallet logic.
 // The recipient side is independently verified by Monero's own wallet2 (monero-wallet-rpc).
 // Requires leakswap-private/docker running. Run from this repo:
-//   ../leakswap-all/leakswap-private/e2e-ui/node_modules/.bin/tsx tests/regtestSend.ts
+//   ../leakswap-all/leakswap-private/e2e-ui/node_modules/.bin/tsx tests/regtestSend.mts
 import { createRequire } from 'node:module';
 import {
   MoneroNetworkType,
@@ -12,8 +12,8 @@ import {
 const require = createRequire(import.meta.url);
 const wasm = require('../pkg-node/zebgen_monero_wasm.js');
 
-const DAEMON = 'http://127.0.0.1:18081';
-const WALLET_RPC = 'http://127.0.0.1:18083';
+const DAEMON = process.env.MONERO_TEST_DAEMON ?? 'http://127.0.0.1:18081';
+const WALLET_RPC = process.env.MONERO_TEST_WALLET_RPC ?? 'http://127.0.0.1:18083';
 const ONE_XMR = 1_000_000_000_000n;
 
 async function jsonRpc<T>(url: string, method: string, params: object = {}): Promise<T> {
