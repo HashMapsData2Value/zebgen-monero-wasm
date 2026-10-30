@@ -54,7 +54,14 @@ await mine(sender.address, 1);
 await mine(miner.address, 200);
 
 const startBalance = BigInt(
-  await wasm.unlockedBalance(RESTRICTED, undefined, undefined, sender.privateSpendKey, sender.privateViewKey, restoreHeight)
+  await wasm.unlockedBalance(
+    RESTRICTED,
+    undefined,
+    undefined,
+    sender.privateSpendKey,
+    sender.privateViewKey,
+    restoreHeight,
+  ),
 );
 expect(startBalance > ONE_XMR, `restricted RPC: scan + spent check work (${startBalance})`);
 
@@ -68,9 +75,12 @@ const tx = await wasm.createTransaction(
   restoreHeight,
   recipient.address,
   ONE_XMR.toString(),
-  true
+  true,
 );
-expect(Boolean(tx.hash) && tx.relayed, `restricted RPC: decoys, fee, sign and relay work (${tx.hash})`);
+expect(
+  Boolean(tx.hash) && tx.relayed,
+  `restricted RPC: decoys, fee, sign and relay work (${tx.hash})`,
+);
 
 await mine(miner.address, 11);
 const recipientBalance = BigInt(
@@ -80,8 +90,8 @@ const recipientBalance = BigInt(
     undefined,
     recipient.privateSpendKey,
     recipient.privateViewKey,
-    restoreHeight
-  )
+    restoreHeight,
+  ),
 );
 expect(recipientBalance === ONE_XMR, `recipient received exactly 1 XMR (${recipientBalance})`);
 console.log('PASS');

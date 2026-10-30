@@ -9,15 +9,18 @@ const view = '02' + '00'.repeat(31);
 test('balance scan stops between batches and restarts at a higher height', async () => {
   const controller = new AbortController();
   let updates = 0;
-  await assert.rejects(unlockedBalance(daemon, undefined, undefined, spend, view, 0, {
-    signal: controller.signal,
-    onProgress(progress) {
-      updates++;
-      assert.equal(progress.scannedHeight, 100);
-      assert.ok(progress.targetHeight > 100);
-      controller.abort();
-    },
-  }), /aborted/);
+  await assert.rejects(
+    unlockedBalance(daemon, undefined, undefined, spend, view, 0, {
+      signal: controller.signal,
+      onProgress(progress) {
+        updates++;
+        assert.equal(progress.scannedHeight, 100);
+        assert.ok(progress.targetHeight > 100);
+        controller.abort();
+      },
+    }),
+    /aborted/,
+  );
   assert.equal(updates, 1);
   const response = await fetch(daemon + '/get_height');
   const { height } = await response.json();
@@ -28,15 +31,24 @@ test('balance scan aborts an in-flight fetch without waiting for an RPC timeout'
   const originalFetch = global.fetch;
   const controller = new AbortController();
   let requestAborted = false;
-  global.fetch = request => new Promise((resolve, reject) => {
-    request.signal.addEventListener('abort', () => {
-      requestAborted = true;
-      reject(new DOMException('Aborted', 'AbortError'));
-    }, { once: true });
-    controller.abort();
-  });
+  global.fetch = (request) =>
+    new Promise((resolve, reject) => {
+      request.signal.addEventListener(
+        'abort',
+        () => {
+          requestAborted = true;
+          reject(new DOMException('Aborted', 'AbortError'));
+        },
+        { once: true },
+      );
+      controller.abort();
+    });
   try {
-    await assert.rejects(unlockedBalance(daemon, undefined, undefined, spend, view, 0, { signal: controller.signal }));
+    await assert.rejects(
+      unlockedBalance(daemon, undefined, undefined, spend, view, 0, { signal: controller.signal }),
+    );
     assert.equal(requestAborted, true);
-  } finally { global.fetch = originalFetch; }
+  } finally {
+    global.fetch = originalFetch;
+  }
 });
